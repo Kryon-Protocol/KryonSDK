@@ -283,3 +283,190 @@ describe("cancel", () => {
     expect(failures[0]!.nonce).toBe("2");
   });
 });
+
+describe("open orders", () => {
+  it("recovers resting orders with the nonces needed to cancel them", async () => {
+    const { fetch, calls } = stubFetch([
+      {
+        body: {
+          address: "G",
+          status: "open",
+          count: 1,
+          orders: [
+            {
+              id: "GABC:1780061000000",
+              owner: "GABC",
+              market_id: 1,
+              is_long: true,
+              size: "10000000",
+              limit_price: "500000000000000000",
+              filled_size: "2500000",
+              remaining_size: "7500000",
+              reduce_only: false,
+              nonce: "1780061000000",
+              expiry_ts: "1780064600",
+              cancelled: false,
+              expired: false,
+              created_at: 1780061000000,
+              updated_at: 1780061000000,
+            },
+          ],
+        },
+      },
+    ]);
+    const client = new KryonClient({
+      network: "testnet", signer: KeypairSigner.random(), fetch,
+    });
+    const orders = await client.openOrders();
+
+    expect(orders).toHaveLength(1);
+    expect(orders[0]!.nonce).toBe(1780061000000n);
+    expect(orders[0]!.size).toBe("1.0000");
+    expect(orders[0]!.filledSize).toBe("0.2500");
+    expect(orders[0]!.remainingSize).toBe("0.7500");
+    expect(orders[0]!.limitPrice).toBe("0.5000");
+    expect(calls[0]!.url).toContain("status=open");
+  });
+
+  it("scopes to one market when asked", async () => {
+    const { fetch, calls } = stubFetch([{ body: { orders: [] } }]);
+    const client = new KryonClient({
+      network: "testnet", signer: KeypairSigner.random(), fetch,
+    });
+    await client.openOrders({ market: "BTC-PERP" });
+    expect(calls[0]!.url).toContain("market_id=2");
+  });
+});
+
+describe("cancelAll", () => {
+  it("signs the scope, so a market-scoped signature cannot wipe everything", async () => {
+    const signer = KeypairSigner.random();
+    const { fetch, calls } = stubFetch([{ body: { ok: true, cancelled: 2, nonces: ["1", "2"] } }]);
+    const client = new KryonClient({ network: "testnet", signer, fetch });
+
+    const cancelled = await client.cancelAll({ market: "XLM-PERP" });
+    expect(cancelled).toEqual([1n, 2n]);
+
+    const body = JSON.parse(String(calls[0]!.init.body));
+    expect(body.market_id).toBe(1);
+
+    // The signature must cover the scope AND the timestamp.
+    const message = [
+      "domain=kryon.perps",
+      "action=cancel_all",
+      "network=Test SDF Network ; September 2015",
+      `owner=${signer.publicKey()}`,
+      "market_id=1",
+      `issued_at=${body.issued_at}`,
+    ].join("\n");
+    expect(verifySignedMessage(signer.publicKey(), message, body.signature)).toBe(true);
+
+    // The same signature must NOT verify for a wider scope.
+    const widened = message.replace("market_id=1", "market_id=all");
+    expect(verifySignedMessage(signer.publicKey(), widened, body.signature)).toBe(false);
+  });
+
+  it("defaults to every market", async () => {
+    const { fetch, calls } = stubFetch([{ body: { ok: true, cancelled: 0, nonces: [] } }]);
+    const client = new KryonClient({
+      network: "testnet", signer: KeypairSigner.random(), fetch,
+    });
+    await client.cancelAll();
+    expect(JSON.parse(String(calls[0]!.init.body)).market_id).toBe("all");
+  });
+});
+
+describe("venue time", () => {
+  it("measures clock offset against the request midpoint, not its start", async () => {
+    const venueNow = 1780061000000;
+    const { fetch } = stubFetch([
+      {
+        body: {
+          unix_ms: venueNow,
+          unix_seconds: Math.floor(venueNow / 1000),
+          iso: new Date(venueNow).toISOString(),
+          min_ttl_seconds: 5,
+          max_ttl_seconds: 604800,
+        },
+      },
+    ]);
+    const client = new KryonClient({ network: "testnet", fetch });
+    const time = await client.time();
+    expect(time.minTtlSeconds).toBe(5);
+    expect(time.offsetMs).toBe(Math.round(Date.now() - venueNow));
+  });
+});
+
+describe("listMarkets", () => {
+  it("returns trading parameters alongside live state, in one request", async () => {
+    const { fetch, calls } = stubFetch([
+      {
+        body: {
+          network: "testnet",
+          markets: [
+            {
+              market_id: 2, symbol: "BTC-PERP", active: true,
+              last_price: "77334100000000000000000",
+              volume: "0", long_open_interest: "0", short_open_interest: "0",
+              funding_long_index: "0", funding_short_index: "0",
+              last_oracle_price: "77334100000000000000000",
+              last_oracle_ledger: 1, updated_at: 1780061000000,
+              base_asset: "BTC", quote_asset: "USDC",
+              price_decimals: 1, size_decimals: 4,
+              tick_sizes: [0.1, 1, 10, 100],
+              max_leverage_bps: 500000, initial_margin_bps: 200,
+              maintenance_margin_bps: 100, liquidation_fee_bps: 25,
+              max_open_interest_base: 25,
+            },
+          ],
+        },
+      },
+    ]);
+    const client = new KryonClient({ network: "testnet", fetch });
+    const markets = await client.listMarkets();
+
+    expect(calls).toHaveLength(1);
+    expect(markets[0]!.symbol).toBe("BTC-PERP");
+    expect(markets[0]!.lastPrice).toBe("77334.1");
+    expect(markets[0]!.tickSizes).toEqual([0.1, 1, 10, 100]);
+    expect(markets[0]!.maxLeverageBps).toBe(500000);
+  });
+
+  it("falls back to per-market reads on a venue without the listing route", async () => {
+    const { fetch } = stubFetch([
+      { status: 404, body: { error: "not_found" } },
+      { body: { ok: true, network: "mainnet", markets: ["XLM-PERP"], websocketConfigured: true, timestamp: "" } },
+      { body: { market_id: 1, symbol: "XLM-PERP", last_price: "183100000000000000", volume: "0", long_open_interest: "0", short_open_interest: "0", funding_long_index: "0", funding_short_index: "0", last_oracle_price: "183100000000000000", active: true } },
+    ]);
+    const client = new KryonClient({ network: "mainnet", fetch, maxAttempts: 1 });
+    const markets = await client.listMarkets();
+    expect(markets.map((m) => m.symbol)).toEqual(["XLM-PERP"]);
+    expect(markets[0]!.tickSizes).toEqual([0.0001, 0.001, 0.01, 0.1]);
+  });
+});
+
+describe("positions", () => {
+  it("converts to human units", async () => {
+    const { fetch } = stubFetch([
+      {
+        body: {
+          positions: [
+            {
+              position_id: "1", market_id: 1, is_long: true,
+              size: "50000000", entry_price: "200000000000000000",
+              margin: "10000000", last_funding_index: "0",
+              mode: "cross", updated_at: 1780061000000,
+            },
+          ],
+        },
+      },
+    ]);
+    const client = new KryonClient({
+      network: "testnet", signer: KeypairSigner.random(), fetch,
+    });
+    const positions = await client.positions();
+    expect(positions[0]!.size).toBe("5.0000");
+    expect(positions[0]!.entryPrice).toBe("0.2000");
+    expect(positions[0]!.margin).toBe("1");
+  });
+});

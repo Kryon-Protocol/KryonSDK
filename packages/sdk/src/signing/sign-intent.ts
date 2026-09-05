@@ -6,10 +6,12 @@
  */
 
 import {
+  cancelAllCanonicalMessage,
   cancelCanonicalMessage,
   isU64,
   orderCanonicalMessage,
   type OrderIntentWire,
+  type SignedCancelAllIntent,
   type SignedCancelIntent,
   type SignedOrderIntent,
 } from "./canonical.js";
@@ -88,4 +90,37 @@ export async function signCancelIntent(
   }
 
   return { owner, nonce: nonce.toString(), signature };
+}
+
+/**
+ * Sign a bulk-cancel intent, producing the `POST /api/orders/cancel-all` body.
+ *
+ * @param marketId Scope the cancel to one market, or `"all"`.
+ * @param issuedAt Unix seconds. Defaults to now; pass the venue's clock
+ *   (`GET /api/time`) instead if this host's clock is known to drift, since
+ *   the venue refuses anything outside a 60-second window.
+ */
+export async function signCancelAllIntent(
+  signer: KryonSigner,
+  networkPassphrase: string,
+  marketId: number | "all" = "all",
+  issuedAt: number = Math.floor(Date.now() / 1000),
+): Promise<SignedCancelAllIntent> {
+  const owner = signer.publicKey();
+  const issued = Math.floor(issuedAt).toString();
+  const message = cancelAllCanonicalMessage(
+    networkPassphrase,
+    owner,
+    marketId,
+    issued,
+  );
+  const signature = await signer.signMessage(message);
+
+  if (!verifySignedMessage(owner, message, signature)) {
+    throw new Error(
+      "Produced cancel-all signature does not verify against the owner's public key.",
+    );
+  }
+
+  return { owner, market_id: marketId, issued_at: issued, signature };
 }

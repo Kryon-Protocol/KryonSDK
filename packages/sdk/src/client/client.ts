@@ -7,6 +7,8 @@
  */
 
 import {
+  MARKETS,
+  MARKETS_BY_ID,
   getNetworkConfig,
   resolveMarket,
   type MarketConfig,
@@ -14,6 +16,7 @@ import {
   type NetworkId,
 } from "../config/index.js";
 import {
+  signCancelAllIntent,
   signCancelIntent,
   signOrderIntent,
   MonotonicNonceSource,
@@ -33,12 +36,15 @@ import { HttpClient } from "./http.js";
 import type {
   AccountHealth,
   Fill,
+  MarketListing,
   MarketState,
+  OpenOrder,
   OrderBook,
   PlacedOrder,
   Position,
   Trade,
   VenueStatus,
+  VenueTime,
 } from "./types.js";
 
 /** How an order is placed. */
@@ -130,6 +136,128 @@ export class KryonClient {
    */
   async status(): Promise<VenueStatus> {
     return this.#http.get<VenueStatus>("/api/ready");
+  }
+
+  /**
+   * The venue's clock, and this host's offset from it.
+   *
+   * Orders are rejected when `expiry_ts` is within 5 seconds of the VENUE's
+   * clock, so a host running a few seconds fast has orders refused with an
+   * error that never mentions time. Call this at startup: if `offsetMs` is
+   * more than a second or two, fix the host clock rather than padding TTLs.
+   */
+  async time(): Promise<VenueTime> {
+    const before = Date.now();
+    const raw = await this.#http.get<{
+      unix_ms: number;
+      unix_seconds: number;
+      iso: string;
+      min_ttl_seconds: number;
+      max_ttl_seconds: number;
+    }>("/api/time");
+    const after = Date.now();
+
+    // Compare against the midpoint of the request so network latency is not
+    // counted as clock skew.
+    const localAtVenue = (before + after) / 2;
+    return {
+      unixMs: raw.unix_ms,
+      unixSeconds: raw.unix_seconds,
+      iso: raw.iso,
+      minTtlSeconds: raw.min_ttl_seconds,
+      maxTtlSeconds: raw.max_ttl_seconds,
+      offsetMs: Math.round(localAtVenue - raw.unix_ms),
+    };
+  }
+
+  /**
+   * Every market the venue serves, with its trading parameters.
+   *
+   * Prefer this over `markets()`: it is one request rather than one per
+   * market, and it carries the tick sizes and margin rules needed to size an
+   * order. Falls back to per-market reads on a venue too old to have the
+   * listing endpoint.
+   */
+  async listMarkets(): Promise<MarketListing[]> {
+    let raw: {
+      markets: Array<Record<string, unknown>>;
+    };
+    try {
+      raw = await this.#http.get<{ markets: Array<Record<string, unknown>> }>(
+        "/api/markets",
+      );
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+      // Older venue: synthesise the listing from what we can reach.
+      const states = await this.markets();
+      return states.map((state) => {
+        const config = MARKETS[state.symbol];
+        return {
+          ...state,
+          baseAsset: config?.baseAsset ?? null,
+          quoteAsset: config?.quoteAsset ?? null,
+          priceDecimals: config?.priceDecimals ?? null,
+          sizeDecimals: config?.sizeDecimals ?? null,
+          tickSizes: config?.tickSizes ?? null,
+          maxLeverageBps: config?.maxLeverageBps ?? null,
+          initialMarginBps: config?.initialMarginBps ?? null,
+          maintenanceMarginBps: config?.maintenanceMarginBps ?? null,
+          liquidationFeeBps: config?.liquidationFeeBps ?? null,
+          maxOpenInterestBase: config?.maxOpenInterestBase ?? null,
+          updatedAt: Date.now(),
+        };
+      });
+    }
+
+    return raw.markets.map((m) => {
+      const symbol = String(m["symbol"]);
+      const priceDecimals =
+        m["price_decimals"] === null ? null : Number(m["price_decimals"]);
+      const sizeDecimals =
+        m["size_decimals"] === null ? null : Number(m["size_decimals"]);
+
+      return {
+        marketId: Number(m["market_id"]),
+        symbol,
+        active: Boolean(m["active"]),
+        lastPrice: priceFromWire(String(m["last_price"]), priceDecimals ?? undefined),
+        volume: sizeFromWire(String(m["volume"]), sizeDecimals ?? undefined),
+        longOpenInterest: sizeFromWire(
+          String(m["long_open_interest"]),
+          sizeDecimals ?? undefined,
+        ),
+        shortOpenInterest: sizeFromWire(
+          String(m["short_open_interest"]),
+          sizeDecimals ?? undefined,
+        ),
+        fundingLongIndex: priceFromWire(String(m["funding_long_index"])),
+        fundingShortIndex: priceFromWire(String(m["funding_short_index"])),
+        lastOraclePrice: priceFromWire(
+          String(m["last_oracle_price"]),
+          priceDecimals ?? undefined,
+        ),
+        baseAsset: (m["base_asset"] as string | null) ?? null,
+        quoteAsset: (m["quote_asset"] as string | null) ?? null,
+        priceDecimals,
+        sizeDecimals,
+        tickSizes: (m["tick_sizes"] as number[] | null) ?? null,
+        maxLeverageBps:
+          m["max_leverage_bps"] === null ? null : Number(m["max_leverage_bps"]),
+        initialMarginBps:
+          m["initial_margin_bps"] === null ? null : Number(m["initial_margin_bps"]),
+        maintenanceMarginBps:
+          m["maintenance_margin_bps"] === null
+            ? null
+            : Number(m["maintenance_margin_bps"]),
+        liquidationFeeBps:
+          m["liquidation_fee_bps"] === null ? null : Number(m["liquidation_fee_bps"]),
+        maxOpenInterestBase:
+          m["max_open_interest_base"] === null
+            ? null
+            : Number(m["max_open_interest_base"]),
+        updatedAt: Number(m["updated_at"] ?? Date.now()),
+      };
+    });
   }
 
   // ── Market data ──────────────────────────────────────────────────────────
@@ -269,6 +397,97 @@ export class KryonClient {
     );
   }
 
+  /**
+   * This account's own orders.
+   *
+   * Call this on startup. A nonce otherwise exists only inside the process
+   * that generated it, so a bot that restarts has no way to find what it left
+   * resting, cannot cancel it, and cannot reconcile its exposure. Feed the
+   * highest nonce back into a `MonotonicNonceSource.observe()` so a restart
+   * cannot reissue one.
+   *
+   * @param options.status `"open"` (default) excludes cancelled, filled and
+   *   expired orders; `"all"` returns everything, newest first.
+   */
+  async openOrders(options?: {
+    address?: string;
+    status?: "open" | "all";
+    market?: string | number | MarketConfig;
+    limit?: number;
+  }): Promise<OpenOrder[]> {
+    const address = options?.address ?? this.address;
+    const marketId =
+      options?.market === undefined
+        ? undefined
+        : this.#resolveMarket(options.market).marketId;
+
+    const raw = await this.#http.get<{
+      orders: Array<Record<string, unknown>>;
+    }>("/api/orders/list", {
+      address,
+      status: options?.status ?? "open",
+      market_id: marketId,
+      limit: options?.limit ?? 100,
+    });
+
+    return (raw.orders ?? []).map((o) => {
+      const config = MARKETS_BY_ID.get(Number(o["market_id"]));
+      return {
+        id: String(o["id"]),
+        owner: String(o["owner"]),
+        marketId: Number(o["market_id"]),
+        isLong: Boolean(o["is_long"]),
+        size: sizeFromWire(String(o["size"]), config?.sizeDecimals),
+        limitPrice: priceFromWire(String(o["limit_price"]), config?.priceDecimals),
+        filledSize: sizeFromWire(String(o["filled_size"]), config?.sizeDecimals),
+        remainingSize: sizeFromWire(
+          String(o["remaining_size"]),
+          config?.sizeDecimals,
+        ),
+        reduceOnly: Boolean(o["reduce_only"]),
+        nonce: BigInt(String(o["nonce"])),
+        expiryTs: BigInt(String(o["expiry_ts"])),
+        cancelled: Boolean(o["cancelled"]),
+        expired: Boolean(o["expired"]),
+        createdAt: Number(o["created_at"]),
+        updatedAt: Number(o["updated_at"]),
+      };
+    });
+  }
+
+  /**
+   * This account's open positions.
+   *
+   * A cheap read, safe to call on every loop — unlike the portfolio endpoint,
+   * which builds an equity curve out of five tables.
+   */
+  async positions(options?: {
+    address?: string;
+    market?: string | number | MarketConfig;
+  }): Promise<Position[]> {
+    const address = options?.address ?? this.address;
+    const marketId =
+      options?.market === undefined
+        ? undefined
+        : this.#resolveMarket(options.market).marketId;
+
+    const raw = await this.#http.get<{
+      positions: Array<Record<string, unknown>>;
+    }>("/api/positions", { address, market_id: marketId });
+
+    return (raw.positions ?? []).map((p) => {
+      const config = MARKETS_BY_ID.get(Number(p["market_id"]));
+      return {
+        marketId: Number(p["market_id"]),
+        isLong: Boolean(p["is_long"]),
+        size: sizeFromWire(String(p["size"]), config?.sizeDecimals),
+        entryPrice: priceFromWire(String(p["entry_price"]), config?.priceDecimals),
+        margin: sizeFromWire(String(p["margin"])),
+        lastFundingIndex: priceFromWire(String(p["last_funding_index"])),
+      };
+    });
+  }
+
   // ── Trading ──────────────────────────────────────────────────────────────
 
   /**
@@ -367,6 +586,44 @@ export class KryonClient {
   }
 
   /**
+   * Cancel every resting order in one request — the kill switch.
+   *
+   * Prefer this to cancelling nonce by nonce when taking a bot flat: the
+   * per-order route allows 60 a minute, so a book of any size can be rate
+   * limited half way through and left partly live. One call cannot be.
+   *
+   * The signature is valid for about a minute, since it covers a timestamp
+   * rather than a nonce. If this host's clock drifts, pass `issuedAt` from
+   * `time()`.
+   *
+   * @param market Scope to one market, or omit for every market.
+   * @returns the nonces that were cancelled.
+   */
+  async cancelAll(options?: {
+    market?: string | number | MarketConfig;
+    issuedAt?: number;
+  }): Promise<bigint[]> {
+    const signer = this.#requireSigner();
+    const marketId =
+      options?.market === undefined
+        ? ("all" as const)
+        : this.#resolveMarket(options.market).marketId;
+
+    const signed = await signCancelAllIntent(
+      signer,
+      this.network.passphrase,
+      marketId,
+      options?.issuedAt ?? Math.floor(Date.now() / 1000),
+    );
+
+    const result = await this.#http.post<{ ok: true; cancelled: number; nonces: string[] }>(
+      "/api/orders/cancel-all",
+      signed,
+    );
+    return (result.nonces ?? []).map((n) => BigInt(n));
+  }
+
+  /**
    * Cancel many orders.
    *
    * The venue has no bulk-cancel route, so this issues one request per nonce,
@@ -417,4 +674,16 @@ export class KryonClient {
   }
 }
 
-export type { AccountHealth, Fill, MarketState, OrderBook, PlacedOrder, Position, Trade, VenueStatus };
+export type {
+  AccountHealth,
+  Fill,
+  MarketListing,
+  MarketState,
+  OpenOrder,
+  OrderBook,
+  PlacedOrder,
+  Position,
+  Trade,
+  VenueStatus,
+  VenueTime,
+};

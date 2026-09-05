@@ -3,11 +3,14 @@ export {
   AMOUNT_PRECISION,
   BPS_PRECISION,
   PRICE_PRECISION,
+  CANCEL_ALL_WINDOW_SECONDS,
+  cancelAllCanonicalMessage,
   cancelCanonicalMessage,
   isU64,
   orderCanonicalMessage,
   type OrderIntentWire,
   type PubkeyHex,
+  type SignedCancelAllIntent,
   type SignedCancelIntent,
   type SignedOrderIntent,
 } from "./canonical.js";
@@ -29,4 +32,8 @@ export {
   PersistentNonceSource,
   type NonceSource,
 } from "./nonce.js";
-export { signCancelIntent, signOrderIntent } from "./sign-intent.js";
+export {
+  signCancelAllIntent,
+  signCancelIntent,
+  signOrderIntent,
+} from "./sign-intent.js";

@@ -9,10 +9,13 @@ export type {
   AccountHealth,
   BookLevel,
   Fill,
+  MarketListing,
   MarketState,
+  OpenOrder,
   OrderBook,
   PlacedOrder,
   Position,
   Trade,
   VenueStatus,
+  VenueTime,
 } from "./types.js";

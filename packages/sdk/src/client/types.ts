@@ -164,3 +164,58 @@ export interface VenueStatus {
   websocketConfigured: boolean;
   timestamp: string;
 }
+
+/** A resting or historical order belonging to an account. */
+export interface OpenOrder {
+  /** `<owner>:<nonce>`. */
+  id: string;
+  owner: string;
+  marketId: number;
+  isLong: boolean;
+  /** Human-unit size originally submitted. */
+  size: string;
+  /** Human-unit limit price, "0" for a market order. */
+  limitPrice: string;
+  /** How much has been filled so far, human units. */
+  filledSize: string;
+  /** size - filledSize, human units. */
+  remainingSize: string;
+  reduceOnly: boolean;
+  /** The cancel handle. */
+  nonce: bigint;
+  /** Unix seconds. */
+  expiryTs: bigint;
+  cancelled: boolean;
+  expired: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Static and live information about one market, from the listing endpoint. */
+export interface MarketListing extends MarketState {
+  baseAsset: string | null;
+  quoteAsset: string | null;
+  priceDecimals: number | null;
+  sizeDecimals: number | null;
+  tickSizes: number[] | null;
+  maxLeverageBps: number | null;
+  initialMarginBps: number | null;
+  maintenanceMarginBps: number | null;
+  liquidationFeeBps: number | null;
+  maxOpenInterestBase: number | null;
+  updatedAt: number;
+}
+
+/** The venue's clock and its order-expiry bounds. */
+export interface VenueTime {
+  unixMs: number;
+  unixSeconds: number;
+  iso: string;
+  minTtlSeconds: number;
+  maxTtlSeconds: number;
+  /**
+   * This host's clock minus the venue's, in milliseconds, measured across the
+   * request. Positive means this machine runs fast.
+   */
+  offsetMs: number;
+}

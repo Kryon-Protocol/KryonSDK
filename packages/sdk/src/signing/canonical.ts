@@ -135,6 +135,46 @@ export function cancelCanonicalMessage(
   ].join("\n");
 }
 
+/**
+ * The newline-delimited canonical message for a bulk cancel.
+ *
+ * A bulk cancel has no nonce to bind to, so a captured signature would cancel
+ * every future order the account ever places. `issuedAt` bounds that: the
+ * venue rejects a message whose timestamp is more than
+ * `CANCEL_ALL_WINDOW_SECONDS` from its own clock.
+ *
+ * `marketId` is signed too, so a signature scoped to one market cannot be
+ * replayed to wipe the account's entire book.
+ *
+ * @param marketId A market id, or the literal `"all"`.
+ */
+export function cancelAllCanonicalMessage(
+  networkPassphrase: string,
+  owner: string,
+  marketId: number | "all",
+  issuedAt: bigint | number | string,
+): string {
+  return [
+    `domain=${APP_DOMAIN}`,
+    "action=cancel_all",
+    `network=${networkPassphrase}`,
+    `owner=${owner}`,
+    `market_id=${marketId}`,
+    `issued_at=${issuedAt.toString()}`,
+  ].join("\n");
+}
+
+/** How far from the venue's clock a bulk-cancel signature stays valid. */
+export const CANCEL_ALL_WINDOW_SECONDS = 60;
+
+/** The `POST /api/orders/cancel-all` body. */
+export interface SignedCancelAllIntent {
+  owner: string;
+  market_id: number | "all";
+  issued_at: string;
+  signature: string;
+}
+
 const MAX_U64 = (1n << 64n) - 1n;
 
 /** True when `n` fits the contract's uint64 ABI. */
