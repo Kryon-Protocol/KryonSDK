@@ -394,6 +394,18 @@ describe("venue time", () => {
     const time = await client.time();
     expect(time.minTtlSeconds).toBe(5);
     expect(time.offsetMs).toBe(Math.round(Date.now() - venueNow));
+    expect(time.measured).toBe(true);
+  });
+});
+
+describe("venue without a clock endpoint", () => {
+  it("reports the offset as unmeasured rather than as zero skew", async () => {
+    const { fetch } = stubFetch([{ status: 404, body: { error: "not_found" } }]);
+    const client = new KryonClient({ network: "testnet", fetch, maxAttempts: 1 });
+    const time = await client.time();
+    // An unmeasured zero must never read as "the clocks agree".
+    expect(time.measured).toBe(false);
+    expect(time.offsetMs).toBe(0);
   });
 });
 

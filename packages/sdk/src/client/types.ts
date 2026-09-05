@@ -216,6 +216,16 @@ export interface VenueTime {
   /**
    * This host's clock minus the venue's, in milliseconds, measured across the
    * request. Positive means this machine runs fast.
+   *
+   * Meaningless unless `measured` is true.
    */
   offsetMs: number;
+  /**
+   * Whether the offset was actually measured against the venue.
+   *
+   * False when the venue has no clock endpoint, in which case `offsetMs` is 0
+   * because it is unknown — not because the clocks agree. Reporting an
+   * unmeasured zero as "in sync" is worse than reporting nothing.
+   */
+  measured: boolean;
 }

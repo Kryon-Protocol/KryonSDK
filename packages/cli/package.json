@@ -1,0 +1,28 @@
+{
+  "name": "kryon-agent",
+  "version": "0.1.0",
+  "description": "CLI for Kryon trading agents — one-command testnet onboarding, diagnostics, and a manual kill switch.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": { "kryon-agent": "./dist/cli.js" },
+  "files": ["dist", "README.md"],
+  "engines": { "node": ">=20" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kryon-Protocol/KryonSDK.git",
+    "directory": "packages/cli"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@kryon/sdk": "workspace:*",
+    "@stellar/stellar-sdk": "^13.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2"
+  }
+}

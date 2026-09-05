@@ -192,6 +192,7 @@ export class KryonClient {
         minTtlSeconds: 5,
         maxTtlSeconds: 7 * 24 * 3600,
         offsetMs: 0,
+        measured: false,
       };
     }
     const after = Date.now();
@@ -206,6 +207,7 @@ export class KryonClient {
       minTtlSeconds: raw.min_ttl_seconds,
       maxTtlSeconds: raw.max_ttl_seconds,
       offsetMs: Math.round(localAtVenue - raw.unix_ms),
+      measured: true,
     };
   }
 
