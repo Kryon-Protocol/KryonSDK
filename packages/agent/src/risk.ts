@@ -133,12 +133,13 @@ export class RiskEngine {
   }
 
   /** Throw if the book is unusable. Separate so it can be checked per market. */
-  checkBook(market: string, book: { crossed: boolean }): void {
+  checkBook(market: string, book: { crossed: boolean; locked?: boolean }): void {
     if ((this.#limits.refuseCrossedBook ?? true) && book.crossed) {
       throw new RiskViolation(
         "crossedBook",
-        `${market} order book is crossed: the best bid is at or above the best ask, ` +
-          `which means those orders cannot actually be filled. Refusing to trade it.`,
+        `${market} order book is ${book.locked ? "locked (best bid equals best ask)" : "crossed (best bid above best ask)"}: ` +
+          `those orders should have matched and did not, so they cannot actually be ` +
+          `filled. Refusing to trade it.`,
       );
     }
   }

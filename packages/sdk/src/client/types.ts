@@ -57,6 +57,13 @@ export interface OrderBook {
   /** bestAsk - bestBid. Negative when the book is crossed. */
   spread: string | null;
   /**
+   * True when the best bid EQUALS the best ask — a "locked" book.
+   *
+   * Less alarming than a crossed book but the same underlying cause: those
+   * orders should have matched. `crossed` is true whenever this is.
+   */
+  locked: boolean;
+  /**
    * True when the best bid is at or above the best ask.
    *
    * On a healthy venue this cannot happen — such orders would have matched.

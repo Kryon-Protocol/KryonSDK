@@ -115,7 +115,7 @@ export class KryonClient {
    * exactly what restart recovery needs. `openOrders()` says so when it is
    * serving from here.
    */
-  readonly #tracked = new Map<bigint, { marketId: number; placedAt: number }>();
+  readonly #tracked = new Map<bigint, TrackedOrder>();
   readonly #warned = new Set<string>();
   #onchain: OnChain | undefined;
   readonly #rpcUrl: string | undefined;
@@ -381,11 +381,13 @@ export class KryonClient {
     let mid: string | null = null;
     let spread: string | null = null;
     let crossed = false;
+    let locked = false;
     if (bestBid !== null && bestAsk !== null) {
       const bidWire = priceToWire(bestBid);
       const askWire = priceToWire(bestAsk);
       mid = priceFromWire((bidWire + askWire) / 2n, config.priceDecimals);
       spread = priceFromWire(askWire - bidWire, config.priceDecimals);
+      locked = bidWire === askWire;
       crossed = bidWire >= askWire;
     }
 
@@ -398,6 +400,7 @@ export class KryonClient {
       bestAsk,
       mid,
       spread,
+      locked,
       crossed,
     };
   }
@@ -702,6 +705,11 @@ export class KryonClient {
     await this.#http.post<{ ok: true }>("/api/orders", signed);
     this.#tracked.set(BigInt(intent.nonce), {
       marketId: config.marketId,
+      isLong: intent.is_long,
+      size: sizeFromWire(sizeWire, config.sizeDecimals),
+      limitPrice: priceFromWire(priceWire, config.priceDecimals),
+      reduceOnly: intent.reduce_only,
+      expiryTs: BigInt(intent.expiry_ts),
       placedAt: Date.now(),
     });
 
@@ -836,25 +844,33 @@ export class KryonClient {
     }
   }
 
-  /** Serve tracked orders when the venue cannot list them. */
+  /**
+   * Serve tracked orders when the venue cannot list them.
+   *
+   * The details are the ones we submitted, so side, size and price are real.
+   * What this CANNOT know is how much has since been filled — only the venue
+   * knows that — so `filledSize` is reported as 0 and `remainingSize` as the
+   * full size. Treat those two as unknown rather than authoritative.
+   */
   #trackedAsOrders(marketId: number | undefined): OpenOrder[] {
     const owner = this.#signer?.publicKey() ?? "";
+    const nowSec = BigInt(Math.floor(Date.now() / 1000));
     return [...this.#tracked.entries()]
       .filter(([, o]) => marketId === undefined || o.marketId === marketId)
       .map(([nonce, o]) => ({
         id: `${owner}:${nonce}`,
         owner,
         marketId: o.marketId,
-        isLong: false,
-        size: "0",
-        limitPrice: "0",
+        isLong: o.isLong,
+        size: o.size,
+        limitPrice: o.limitPrice,
         filledSize: "0",
-        remainingSize: "0",
-        reduceOnly: false,
+        remainingSize: o.size,
+        reduceOnly: o.reduceOnly,
         nonce,
-        expiryTs: 0n,
+        expiryTs: o.expiryTs,
         cancelled: false,
-        expired: false,
+        expired: o.expiryTs <= nowSec,
         createdAt: o.placedAt,
         updatedAt: o.placedAt,
       }));
@@ -876,6 +892,17 @@ export class KryonClient {
     }
     return this.#signer;
   }
+}
+
+/** What the client remembers about an order it placed. */
+interface TrackedOrder {
+  marketId: number;
+  isLong: boolean;
+  size: string;
+  limitPrice: string;
+  reduceOnly: boolean;
+  expiryTs: bigint;
+  placedAt: number;
 }
 
 export type {

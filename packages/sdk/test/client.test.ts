@@ -229,7 +229,19 @@ describe("order book", () => {
     const client = new KryonClient({ network: "mainnet", fetch });
     const book = await client.orderbook("XLM-PERP");
     expect(book.crossed).toBe(true);
+    expect(book.locked).toBe(false);
     expect(book.spread).toBe("-0.0199");
+  });
+
+  it("distinguishes a locked book from a crossed one", async () => {
+    const { fetch } = stubFetch([
+      { body: { bids: [{ price: "0.2000", size: "1" }], asks: [{ price: "0.2000", size: "1" }], timestamp: 1 } },
+    ]);
+    const client = new KryonClient({ network: "testnet", fetch });
+    const book = await client.orderbook("XLM-PERP");
+    expect(book.locked).toBe(true);
+    expect(book.crossed).toBe(true);
+    expect(book.spread).toBe("0.0000");
   });
 
   it("handles an empty book without throwing", async () => {
@@ -480,5 +492,45 @@ describe("positions", () => {
     expect(positions[0]!.size).toBe("5.0000");
     expect(positions[0]!.entryPrice).toBe("0.2000");
     expect(positions[0]!.margin).toBe("1");
+  });
+});
+
+describe("fallback order tracking", () => {
+  it("reports the real side, size and price of orders it placed", async () => {
+    const { fetch } = stubFetch([
+      { body: { ok: true } },                                  // place
+      { status: 404, body: { error: "not_found" } },           // no listing route
+    ]);
+    const client = new KryonClient({
+      network: "testnet", signer: KeypairSigner.random(), fetch, maxAttempts: 1,
+    });
+
+    const placed = await client.placeOrder({
+      market: "XLM-PERP", side: "buy", size: 10, price: 0.05,
+    });
+    const orders = await client.openOrders();
+
+    expect(orders).toHaveLength(1);
+    // Must not invent a side or a zero size — that misreports a BUY as a SELL.
+    expect(orders[0]!.isLong).toBe(true);
+    expect(orders[0]!.size).toBe("10.0000");
+    expect(orders[0]!.limitPrice).toBe("0.0500");
+    expect(orders[0]!.nonce).toBe(placed.nonce);
+  });
+
+  it("forgets an order once it is cancelled", async () => {
+    const { fetch } = stubFetch([
+      { body: { ok: true } },                        // place
+      { body: { ok: true } },                        // cancel
+      { status: 404, body: { error: "not_found" } }, // no listing route
+    ]);
+    const client = new KryonClient({
+      network: "testnet", signer: KeypairSigner.random(), fetch, maxAttempts: 1,
+    });
+    const placed = await client.placeOrder({
+      market: "XLM-PERP", side: "buy", size: 10, price: 0.05,
+    });
+    await client.cancelOrder(placed.nonce);
+    expect(await client.openOrders()).toHaveLength(0);
   });
 });
