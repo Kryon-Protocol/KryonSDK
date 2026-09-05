@@ -32,6 +32,7 @@ import {
   sizeFromWire,
   sizeToWire,
 } from "../util/units.js";
+import { OnChain } from "../onchain/vault.js";
 import { HttpClient } from "./http.js";
 import type {
   AccountHealth,
@@ -88,6 +89,8 @@ export interface KryonClientOptions {
   timeoutMs?: number;
   maxAttempts?: number;
   fetch?: typeof globalThis.fetch;
+  /** Override the Soroban RPC endpoint used for on-chain reads and writes. */
+  rpcUrl?: string;
 }
 
 /** The venue's documented request budgets, per minute. */
@@ -114,11 +117,14 @@ export class KryonClient {
    */
   readonly #tracked = new Map<bigint, { marketId: number; placedAt: number }>();
   readonly #warned = new Set<string>();
+  #onchain: OnChain | undefined;
+  readonly #rpcUrl: string | undefined;
 
   constructor(options: KryonClientOptions) {
     this.network = getNetworkConfig(options.network);
     this.#signer = options.signer;
     this.#nonces = options.nonceSource ?? new MonotonicNonceSource();
+    this.#rpcUrl = options.rpcUrl;
     this.#http = new HttpClient({
       baseUrl: options.apiUrl ?? this.network.apiUrl,
       network: options.network,
@@ -552,6 +558,78 @@ export class KryonClient {
         lastFundingIndex: priceFromWire(String(p["last_funding_index"])),
       };
     });
+  }
+
+  // ── On-chain: collateral and authoritative state ─────────────────────────
+
+  /**
+   * Direct contract access.
+   *
+   * The API's view of your position comes from an indexer and can lag; the
+   * contract's view is authoritative. Use this when the two disagree, and for
+   * anything involving collateral, which never goes through the API at all.
+   */
+  get onchain(): OnChain {
+    this.#onchain ??= new OnChain(
+      this.network,
+      this.#rpcUrl ?? undefined,
+    );
+    return this.#onchain;
+  }
+
+  /**
+   * Deposit USDC into the vault as margin.
+   *
+   * Placing orders needs no collateral — order intake only checks your
+   * signature — but settling a fill does. An unfunded account can rest orders
+   * that can never trade.
+   *
+   * Requires a USDC trustline and USDC in the account.
+   *
+   * @param amount Human USDC, e.g. `50`.
+   * @returns the settled transaction hash.
+   */
+  async deposit(amount: number | string, asset?: string): Promise<string> {
+    return this.onchain.deposit(this.#requireSigner(), amount, asset);
+  }
+
+  /**
+   * Withdraw collateral from the vault.
+   *
+   * Refused by the contract while the remainder would not cover your open
+   * positions, so this can fail for reasons unrelated to your balance.
+   */
+  async withdraw(amount: number | string, asset?: string): Promise<string> {
+    return this.onchain.withdraw(this.#requireSigner(), amount, asset);
+  }
+
+  /**
+   * Margin state from the vault contract.
+   *
+   * Watch `liquidatable` and `marginRatio` rather than inferring health from
+   * PnL.
+   */
+  async accountHealth(address?: string): Promise<AccountHealth | null> {
+    return this.onchain.accountHealth(address ?? this.address);
+  }
+
+  /** Collateral in the vault, human USDC. Not the same as wallet balance. */
+  async vaultBalance(address?: string): Promise<string> {
+    return this.onchain.vaultBalance(address ?? this.address);
+  }
+
+  /** USDC in the account itself, not yet deposited as margin. */
+  async walletBalance(address?: string): Promise<string> {
+    return this.onchain.walletBalance(address ?? this.address);
+  }
+
+  /**
+   * Positions read from the engine contract rather than the indexer.
+   *
+   * Slower than `positions()` but authoritative.
+   */
+  async onchainPositions(address?: string): Promise<Position[]> {
+    return this.onchain.positions(address ?? this.address);
   }
 
   // ── Trading ──────────────────────────────────────────────────────────────
