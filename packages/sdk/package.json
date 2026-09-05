@@ -1,0 +1,53 @@
+{
+  "name": "@kryon/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for the Kryon perpetuals protocol on Stellar/Soroban — order signing, market data, and account operations for trading bots and AI agents.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kryon-Protocol/KryonSDK.git",
+    "directory": "packages/sdk"
+  },
+  "keywords": [
+    "kryon",
+    "stellar",
+    "soroban",
+    "perpetuals",
+    "perps",
+    "trading-bot",
+    "defi"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^13.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

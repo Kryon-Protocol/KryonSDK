@@ -1,0 +1,104 @@
+{
+  "$comment": "Conformance vectors for Kryon signed intents. Generated from the live protocol implementation (client/lib/market/signing-message.ts). Both @kryon/sdk and the perp-order-gateway contract must reproduce every canonical_message and digest here. The key is a published test key and must never be funded.",
+  "generated_from": "client/lib/market/signing-message.ts",
+  "test_key": {
+    "secret": "SBVXE6LPNYWXGZDLFVRW63TGN5ZG2YLOMNSS25TFMN2G64TTFV3DCOX4",
+    "public": "GBADA5HUMX2CP5MM4BVN6AEANHC6TOZU3DSD442TKDXJ24FSNPGQTAYP",
+    "pubkey_hex": "403074f465f427f58ce06adf008069c5e9bb34d8e43e735350ee9d70b26bcd09"
+  },
+  "sep53_prefix": "Stellar Signed Message:\n",
+  "passphrases": {
+    "mainnet": "Public Global Stellar Network ; September 2015",
+    "testnet": "Test SDF Network ; September 2015"
+  },
+  "orders": [
+    {
+      "label": "xlm-long-limit",
+      "network_passphrase": "Test SDF Network ; September 2015",
+      "intent": {
+        "owner": "GBADA5HUMX2CP5MM4BVN6AEANHC6TOZU3DSD442TKDXJ24FSNPGQTAYP",
+        "market_id": 1,
+        "is_long": true,
+        "size": "10000000",
+        "limit_price": "205000000000000000",
+        "reduce_only": false,
+        "nonce": "1780061000000",
+        "expiry_ts": "1780064600"
+      },
+      "canonical_message": "Test SDF Network ; September 2015|place_order|403074f465f427f58ce06adf008069c5e9bb34d8e43e735350ee9d70b26bcd09|1|1|10000000|205000000000000000|0|1780061000000|1780064600",
+      "sep53_digest_hex": "a77714203bb248ed69e07396b16f8df6dacd14ef0479d81d6de0e6f146d0d1ec",
+      "signature_base64": "wSNXpAE9fdvPLMxwrgULMSZroTPxY/3nl5JWdSksll78lPWVPEo2GnqEU69+Wngmy2SzZik6hVQ7EpOGykB1AQ=="
+    },
+    {
+      "label": "btc-short-limit-mainnet",
+      "network_passphrase": "Public Global Stellar Network ; September 2015",
+      "intent": {
+        "owner": "GBADA5HUMX2CP5MM4BVN6AEANHC6TOZU3DSD442TKDXJ24FSNPGQTAYP",
+        "market_id": 2,
+        "is_long": false,
+        "size": "100000",
+        "limit_price": "77334100000000000000000",
+        "reduce_only": false,
+        "nonce": "1780061000001",
+        "expiry_ts": "1780064600"
+      },
+      "canonical_message": "Public Global Stellar Network ; September 2015|place_order|403074f465f427f58ce06adf008069c5e9bb34d8e43e735350ee9d70b26bcd09|2|0|100000|77334100000000000000000|0|1780061000001|1780064600",
+      "sep53_digest_hex": "739180efd1cb9f2478bf379eb95b8ef983b725285158de02d26ee7851c188701",
+      "signature_base64": "8KWWKFTO4rPzVRnasWr0SHSvBocwH7bkRftFu3TKV7rFp4W2qddoZ6RJCnyPZLzmOAO+l3O1MnRS15CIXWc+CA=="
+    },
+    {
+      "label": "eth-market-order-reduce-only",
+      "network_passphrase": "Test SDF Network ; September 2015",
+      "intent": {
+        "owner": "GBADA5HUMX2CP5MM4BVN6AEANHC6TOZU3DSD442TKDXJ24FSNPGQTAYP",
+        "market_id": 3,
+        "is_long": false,
+        "size": "5000000",
+        "limit_price": "0",
+        "reduce_only": true,
+        "nonce": "1780061000002",
+        "expiry_ts": "1780065000"
+      },
+      "canonical_message": "Test SDF Network ; September 2015|place_order|403074f465f427f58ce06adf008069c5e9bb34d8e43e735350ee9d70b26bcd09|3|0|5000000|0|1|1780061000002|1780065000",
+      "sep53_digest_hex": "77982771990ad53c30ee56a7825567590f63ebca6dce3ab02a7c7d4577398249",
+      "signature_base64": "4+OdmLtXd+Tc618OlQeaSF4f0+BlhfD9BH8DuFoYSDztVr+A4s+Fn9qrpP0cz4aL0oInztgDiK53a961h7U4Bg=="
+    },
+    {
+      "label": "trx-max-u64-nonce",
+      "network_passphrase": "Test SDF Network ; September 2015",
+      "intent": {
+        "owner": "GBADA5HUMX2CP5MM4BVN6AEANHC6TOZU3DSD442TKDXJ24FSNPGQTAYP",
+        "market_id": 8,
+        "is_long": true,
+        "size": "1",
+        "limit_price": "1",
+        "reduce_only": false,
+        "nonce": "18446744073709551615",
+        "expiry_ts": "1780064600"
+      },
+      "canonical_message": "Test SDF Network ; September 2015|place_order|403074f465f427f58ce06adf008069c5e9bb34d8e43e735350ee9d70b26bcd09|8|1|1|1|0|18446744073709551615|1780064600",
+      "sep53_digest_hex": "3f2734681bffff110dc7d0eab0edb1b19364597f6077d857135d48a4f4267fba",
+      "signature_base64": "FUiQ2OcL2vK1qtf6cnO4lO5pjSKpzB/ULMaiW7rIhOXiS50o6jW29Mo8U0qhaEBVvFQsg8pKXzGmnA1PcJmRAA=="
+    }
+  ],
+  "cancels": [
+    {
+      "label": "cancel-testnet",
+      "network_passphrase": "Test SDF Network ; September 2015",
+      "owner": "GBADA5HUMX2CP5MM4BVN6AEANHC6TOZU3DSD442TKDXJ24FSNPGQTAYP",
+      "nonce": "1780061000000",
+      "canonical_message": "domain=kryon.perps\naction=cancel_order\nnetwork=Test SDF Network ; September 2015\nowner=GBADA5HUMX2CP5MM4BVN6AEANHC6TOZU3DSD442TKDXJ24FSNPGQTAYP\nnonce=1780061000000",
+      "sep53_digest_hex": "776812cb21b5ceecab4f6b9e9e4776d4f1fba49da447bf6570c60b8997939515",
+      "signature_base64": "Kb5s5D0C1kC2fWDXE4BN62wRsMLZzrw+/y6e4VNoJKGsihWpCeHtevbtQL4ZBjnxQzN60UAHLA8PQ0nMveHHCw=="
+    },
+    {
+      "label": "cancel-mainnet",
+      "network_passphrase": "Public Global Stellar Network ; September 2015",
+      "owner": "GBADA5HUMX2CP5MM4BVN6AEANHC6TOZU3DSD442TKDXJ24FSNPGQTAYP",
+      "nonce": "18446744073709551615",
+      "canonical_message": "domain=kryon.perps\naction=cancel_order\nnetwork=Public Global Stellar Network ; September 2015\nowner=GBADA5HUMX2CP5MM4BVN6AEANHC6TOZU3DSD442TKDXJ24FSNPGQTAYP\nnonce=18446744073709551615",
+      "sep53_digest_hex": "c6011d936599437ca62931d87e909b96d677e97596a2094b3802ed3f15f50989",
+      "signature_base64": "TBRgsNmZuZ5mt9xIH8bJUyfIgUXGIoo5sb6spRpCPHfZWWAX1aIMN8+JDGQ2cq5NBxKIjZZjDXhE8QiKOegqBw=="
+    }
+  ]
+}
