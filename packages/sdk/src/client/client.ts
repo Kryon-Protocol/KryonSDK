@@ -102,6 +102,18 @@ export class KryonClient {
   readonly #http: HttpClient;
   readonly #signer: KryonSigner | undefined;
   readonly #nonces: NonceSource;
+  /**
+   * Orders this client has placed and not yet cancelled.
+   *
+   * Kept so the SDK still works against a venue that lacks
+   * `/api/orders/list` and `/api/orders/cancel-all` — notably production,
+   * where those routes are not deployed yet. It is a fallback, not a
+   * replacement: it cannot see orders placed by a previous process, which is
+   * exactly what restart recovery needs. `openOrders()` says so when it is
+   * serving from here.
+   */
+  readonly #tracked = new Map<bigint, { marketId: number; placedAt: number }>();
+  readonly #warned = new Set<string>();
 
   constructor(options: KryonClientOptions) {
     this.network = getNetworkConfig(options.network);
@@ -148,13 +160,34 @@ export class KryonClient {
    */
   async time(): Promise<VenueTime> {
     const before = Date.now();
-    const raw = await this.#http.get<{
+    let raw: {
       unix_ms: number;
       unix_seconds: number;
       iso: string;
       min_ttl_seconds: number;
       max_ttl_seconds: number;
-    }>("/api/time");
+    };
+    try {
+      raw = await this.#http.get<typeof raw>("/api/time");
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+      // No clock endpoint: report this host's clock with a zero offset, and
+      // say so, since an unmeasurable offset is not the same as no offset.
+      this.#warnOnce(
+        "time",
+        "This venue has no /api/time, so clock skew cannot be measured. " +
+          "If orders are rejected as expiring too soon, check this host's clock.",
+      );
+      const now = Date.now();
+      return {
+        unixMs: now,
+        unixSeconds: Math.floor(now / 1000),
+        iso: new Date(now).toISOString(),
+        minTtlSeconds: 5,
+        maxTtlSeconds: 7 * 24 * 3600,
+        offsetMs: 0,
+      };
+    }
     const after = Date.now();
 
     // Compare against the midpoint of the request so network latency is not
@@ -421,14 +454,29 @@ export class KryonClient {
         ? undefined
         : this.#resolveMarket(options.market).marketId;
 
-    const raw = await this.#http.get<{
-      orders: Array<Record<string, unknown>>;
-    }>("/api/orders/list", {
-      address,
-      status: options?.status ?? "open",
-      market_id: marketId,
-      limit: options?.limit ?? 100,
-    });
+    let raw: { orders: Array<Record<string, unknown>> };
+    try {
+      raw = await this.#http.get<{ orders: Array<Record<string, unknown>> }>(
+        "/api/orders/list",
+        {
+          address,
+          status: options?.status ?? "open",
+          market_id: marketId,
+          limit: options?.limit ?? 100,
+        },
+      );
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+      // Venue has no listing route. Serve what this process placed, and be
+      // explicit that it cannot cover a restart.
+      this.#warnOnce(
+        "openOrders",
+        "This venue has no /api/orders/list, so open orders are being served " +
+          "from this process's own memory. Orders placed by a previous run are " +
+          "invisible, which means restart recovery does not work here.",
+      );
+      return this.#trackedAsOrders(marketId);
+    }
 
     return (raw.orders ?? []).map((o) => {
       const config = MARKETS_BY_ID.get(Number(o["market_id"]));
@@ -471,9 +519,27 @@ export class KryonClient {
         ? undefined
         : this.#resolveMarket(options.market).marketId;
 
-    const raw = await this.#http.get<{
-      positions: Array<Record<string, unknown>>;
-    }>("/api/positions", { address, market_id: marketId });
+    let raw: { positions: Array<Record<string, unknown>> };
+    try {
+      raw = await this.#http.get<{ positions: Array<Record<string, unknown>> }>(
+        "/api/positions",
+        { address, market_id: marketId },
+      );
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+      // Fall back to the analytics route, which also carries positions. It is
+      // far heavier and rate-limited, so warn rather than do this silently.
+      this.#warnOnce(
+        "positions",
+        "This venue has no /api/positions, so positions are coming from " +
+          "/api/portfolio instead. That route joins several analytics tables " +
+          "and is rate limited; avoid calling it on a tight loop.",
+      );
+      const portfolio = await this.#http.get<{
+        positions?: Array<Record<string, unknown>>;
+      }>(`/api/portfolio/${address}`);
+      raw = { positions: portfolio.positions ?? [] };
+    }
 
     return (raw.positions ?? []).map((p) => {
       const config = MARKETS_BY_ID.get(Number(p["market_id"]));
@@ -554,6 +620,10 @@ export class KryonClient {
     // those apart before it sees the status. Retrying is handled there for
     // 5xx/429 only, which is exactly the safe set.
     await this.#http.post<{ ok: true }>("/api/orders", signed);
+    this.#tracked.set(BigInt(intent.nonce), {
+      marketId: config.marketId,
+      placedAt: Date.now(),
+    });
 
     return {
       id: `${owner}:${intent.nonce}`,
@@ -583,6 +653,7 @@ export class KryonClient {
     const signer = this.#requireSigner();
     const signed = await signCancelIntent(signer, this.network.passphrase, nonce);
     await this.#http.post<{ ok: true }>("/api/orders/cancel", signed);
+    this.#tracked.delete(BigInt(nonce));
   }
 
   /**
@@ -616,11 +687,33 @@ export class KryonClient {
       options?.issuedAt ?? Math.floor(Date.now() / 1000),
     );
 
-    const result = await this.#http.post<{ ok: true; cancelled: number; nonces: string[] }>(
-      "/api/orders/cancel-all",
-      signed,
-    );
-    return (result.nonces ?? []).map((n) => BigInt(n));
+    try {
+      const result = await this.#http.post<{
+        ok: true;
+        cancelled: number;
+        nonces: string[];
+      }>("/api/orders/cancel-all", signed);
+      const cancelled = (result.nonces ?? []).map((n) => BigInt(n));
+      for (const nonce of cancelled) this.#tracked.delete(nonce);
+      return cancelled;
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+      // No bulk route: cancel what this process knows about, one at a time.
+      // Slower and bounded by the 60/min cancel budget, but it still takes
+      // the bot flat, which is the point.
+      this.#warnOnce(
+        "cancelAll",
+        "This venue has no /api/orders/cancel-all, so orders are being " +
+          "cancelled one at a time from this process's own list. Orders placed " +
+          "by a previous run will NOT be cancelled.",
+      );
+      const targets = [...this.#tracked.entries()]
+        .filter(([, o]) => marketId === "all" || o.marketId === marketId)
+        .map(([nonce]) => nonce);
+      const failures = await this.cancelOrders(targets);
+      const failed = new Set(failures.map((f) => f.nonce));
+      return targets.filter((n) => !failed.has(n.toString()));
+    }
   }
 
   /**
@@ -661,6 +754,37 @@ export class KryonClient {
         error instanceof Error ? error.message : String(error),
       );
     }
+  }
+
+  /** Serve tracked orders when the venue cannot list them. */
+  #trackedAsOrders(marketId: number | undefined): OpenOrder[] {
+    const owner = this.#signer?.publicKey() ?? "";
+    return [...this.#tracked.entries()]
+      .filter(([, o]) => marketId === undefined || o.marketId === marketId)
+      .map(([nonce, o]) => ({
+        id: `${owner}:${nonce}`,
+        owner,
+        marketId: o.marketId,
+        isLong: false,
+        size: "0",
+        limitPrice: "0",
+        filledSize: "0",
+        remainingSize: "0",
+        reduceOnly: false,
+        nonce,
+        expiryTs: 0n,
+        cancelled: false,
+        expired: false,
+        createdAt: o.placedAt,
+        updatedAt: o.placedAt,
+      }));
+  }
+
+  /** Warn about a missing venue capability once, not on every call. */
+  #warnOnce(key: string, message: string): void {
+    if (this.#warned.has(key)) return;
+    this.#warned.add(key);
+    console.warn(`[kryon] ${message}`);
   }
 
   #requireSigner(): KryonSigner {
