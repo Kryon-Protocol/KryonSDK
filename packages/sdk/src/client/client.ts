@@ -337,12 +337,12 @@ export class KryonClient {
   /**
    * Live state for every market the venue actually serves.
    *
-   * `/api/ready` reports the venue's CONFIGURED market list, which is not the
-   * same as the set registered in its database — as of 2026-09-05 mainnet
-   * advertises all 8 symbols but only has XLM-PERP registered, so asking for
-   * the other 7 returns 404. Markets that are advertised but not served are
-   * skipped here rather than failing the whole call, so a bot enumerating
-   * markets gets what exists instead of an error.
+   * On older venues `/api/ready` reported the CONFIGURED market list rather
+   * than the set actually registered in the database, so it could advertise
+   * markets that return 404 — mainnet listed all 8 symbols while serving only
+   * XLM-PERP. Markets that are advertised but not served are skipped here
+   * rather than failing the whole call, so a bot enumerating markets gets what
+   * exists instead of an error.
    *
    * Use `status()` if you want the advertised list verbatim.
    */

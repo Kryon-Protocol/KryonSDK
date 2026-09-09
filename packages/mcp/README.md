@@ -78,9 +78,10 @@ PREVIEW — nothing has been placed.
   session so far  0 orders, 0.00 USD of 100 USD allowed
 ```
 
-**Crossed books are refused.** Parts of Kryon's live books are crossed or
-locked — orders that should have matched and did not, because their owner
-cannot settle them. It looks like free money to a model. It is not takeable.
+**Crossed books are refused.** Kryon's books have been crossed and locked —
+orders that should have matched and did not, because their owner cannot settle
+or because settlement was failing venue-wide. It looks like free money to a
+model. It is not takeable.
 
 **Everything is audited.** Each call is recorded with its arguments and whether
 it previewed, executed, or was refused.

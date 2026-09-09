@@ -67,10 +67,10 @@ export interface OrderBook {
    * True when the best bid is at or above the best ask.
    *
    * On a healthy venue this cannot happen — such orders would have matched.
-   * On Kryon it does happen, and persistently: orders whose owner lacks the
-   * margin to settle fail simulation, get rolled back, and rest in the book
-   * forever. As of 2026-09-05 the mainnet XLM-PERP book is crossed by ~11%
-   * with 91 of 99 bid levels above the best ask.
+   * On Kryon it does, for two reasons that both leave orders resting forever:
+   * an owner without the margin to settle, or settlement failing venue-wide so
+   * every fill is rolled back. Mainnet XLM-PERP was once crossed by ~11%, with
+   * 91 of 99 bid levels above the best ask.
    *
    * **Check this before deriving a mid-price, a spread, or a signal from the
    * book.** A crossed book is not a trading opportunity: those levels cannot
